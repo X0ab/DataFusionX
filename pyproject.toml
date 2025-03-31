@@ -1,0 +1,23 @@
+[project]
+name = "datafusionx"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "meryaaam",email = "mariemchouaiti@gmail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "yfinance (>=0.2.55,<0.3.0)",
+    "requests (>=2.32.3,<3.0.0)",
+    "tweepy (>=4.15.0,<5.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts] 
+yfinance = "script.yfinance:run"
+ 
