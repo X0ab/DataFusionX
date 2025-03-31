@@ -7,6 +7,6 @@ This project fetches financial data from multiple sources: **Yahoo Finance**, **
 
 ### Using Poetry
 ```sh
-git clone https://github.com/meryaaam/DataFusionX.git
+git clone https://github.com/X0ab/DataFusionX.git
 cd DataFusionX
 poetry install
