@@ -25,4 +25,5 @@ build-backend = "poetry.core.masonry.api"
 yfinance = "script.yfinance:run"
 ffinance = "script.ffinance:run"
 tweepy = "script.tweepy:run"
+vantage ="script.vantage:run"
  

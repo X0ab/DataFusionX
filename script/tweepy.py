@@ -11,6 +11,7 @@ app = typer.Typer(help="Legaldoc Workflow - fetching and parsing tools.")
 @app.command()
 def main() : 
 
+
     load_dotenv('.env.local')
 
     # Get your Bearer Token from environment variables
