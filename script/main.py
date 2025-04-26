@@ -135,7 +135,64 @@ class FinancialNewsSentimentAnalyzer:
             'textblob_subjectivity': textblob_subjectivity
         }
     
- 
+    def process_news(self, news_df):
+        """
+        Process news DataFrame with sentiment analysis
+        """
+        if news_df.empty:
+            return news_df
+            
+        # Apply sentiment analysis
+        news_df['sentiment'] = news_df['summary'].apply(
+            lambda x: self.analyze_sentiment(str(x)) if pd.notnull(x) else None
+        )
+        
+        # Expand sentiment columns
+        sentiment_cols = pd.json_normalize(news_df['sentiment'])
+        news_df = pd.concat([news_df.drop('sentiment', axis=1), sentiment_cols], axis=1)
+        
+        return news_df
+    
+    def aggregate_sentiment_by_ticker(self, news_df):
+        """
+        Aggregate sentiment scores by ticker
+        """
+        if news_df.empty:
+            return pd.DataFrame()
+            
+        # Explode the tickers column to have one row per ticker
+        exploded_df = news_df.explode('tickers')
+        
+        # Group by ticker and calculate mean sentiment
+        aggregated = exploded_df.groupby('tickers').agg({
+            'vader_compound': 'mean',
+            'vader_positive': 'mean',
+            'vader_negative': 'mean',
+            'textblob_polarity': 'mean'
+        }).reset_index()
+        
+        return aggregated
+    
+    def visualize_sentiment(self, aggregated_df, metric='vader_compound'):
+        """
+        Visualize sentiment by ticker
+        """
+        if aggregated_df.empty:
+            print("No data to visualize")
+            return
+            
+        aggregated_df = aggregated_df.sort_values(metric, ascending=False)
+        
+        plt.figure(figsize=(12, 8))
+        plt.bar(aggregated_df['tickers'], aggregated_df[metric])
+        plt.xlabel('Ticker')
+        plt.ylabel('Sentiment Score')
+        plt.title('Average Sentiment by Ticker')
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        plt.show()
+
+
 # Example Usage
 if __name__ == "__main__":
     # Replace with your actual API keys
