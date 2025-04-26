@@ -201,4 +201,30 @@ if __name__ == "__main__":
         'yahoo_finance': '123abc456def789ghi'  # CHANGE ME 
     }
     
-     
+    analyzer = FinancialNewsSentimentAnalyzer(api_keys)
+    
+    # Fetch news for some tech stocks
+    tech_tickers = "AAPL,MSFT,GOOGL,AMZN,TSLA"
+    
+    print("Fetching news from Alpha Vantage...")
+    alpha_news = analyzer.fetch_news('alpha_vantage', tech_tickers, days_back=3)
+    
+    if not alpha_news.empty:
+        print(f"Fetched {len(alpha_news)} articles")
+        
+        # Process and analyze sentiment
+        processed_news = analyzer.process_news(alpha_news)
+        
+        # Aggregate by ticker
+        aggregated = analyzer.aggregate_sentiment_by_ticker(processed_news)
+        print("\nAggregated Sentiment by Ticker:")
+        print(aggregated)
+        
+        # Visualize
+        analyzer.visualize_sentiment(aggregated)
+        
+        # Save results
+        processed_news.to_csv('financial_news_sentiment.csv', index=False)
+        print("\nResults saved to financial_news_sentiment.csv")
+    else:
+        print("No news articles fetched")
