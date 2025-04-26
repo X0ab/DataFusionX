@@ -2,3 +2,4 @@ script/__pycache__
 json
 .env.*
 *.txt
+script/test
