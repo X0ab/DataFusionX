@@ -274,10 +274,87 @@ def show_raw_data(df):
         hide_index=True,
         use_container_width=True
     )
+@st.cache_data(ttl=config.CACHE_TTL)
+def fetch_data_from_csv(csv_path, days_back):
+    """Fetch stock data from a CSV file"""
+    # Load data from CSV
+    df = pd.read_csv(csv_path)
+    
+    # Convert published column to datetime
+    df['published'] = pd.to_datetime(df['published'])
+    
+    # Filter data by the date range (if needed)
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=days_back)
+    
+    df_filtered = df[(df['published'] >= start_date) & (df['published'] <= end_date)]
+    
+    if df_filtered.empty:
+        st.warning("No news articles found for the selected time period.")
+    else:
+        st.write("Fetched articles:", len(df_filtered))
+    
+    return df_filtered
+
+@st.cache_data(ttl=config.CACHE_TTL)
+def fetch_data_from_csv(csv_path):
+    # Read CSV
+    news_df = pd.read_csv(csv_path)
+    
+    # Check if the necessary columns exist
+    required_columns = ['publishedAt', 'urlToImage', 'source', 'title', 'description', 'url']
+    for col in required_columns:
+        if col not in news_df.columns:
+            st.error(f"Missing column: {col}")
+            return None
+
+    # Convert 'publishedAt' column to datetime and ensure it's in UTC
+    news_df['publishedAt'] = pd.to_datetime(news_df['publishedAt'], errors='coerce', utc=True)
+    
+    # Filter by date (example, showing articles from the last 7 days)
+    news_df = news_df[news_df['publishedAt'] >= pd.to_datetime('today', utc=True) - pd.Timedelta(days=7)]
+
+    return news_df
 
 def main():
     """Main application function"""
     st.title("📰 Financial News Sentiment Dashboard")
+    
+    #news = fetch_news_api(config.DEFAULT_TICKERS, config.TIME_WINDOW.days)
+     
+    csv_path = "data/convertcsv.csv"  # Replace with the actual path to the CSV file
+    news_df = pd.read_csv(csv_path)
+    df = pd.DataFrame(news_df)
+
+    # Displaying the news swiper
+    #st.title("📰 News Swiper")
+
+    # Track the index of the article being displayed
+    if 'index' not in st.session_state:
+        st.session_state.index = 0
+
+    # Display current article
+    
+    article = df.iloc[st.session_state.index]
+    col1, col2 = st.columns(2)
+    with col1:
+        st.image(article['urlToImage'], caption=f"Source: {article['source']}", width=200)
+        col3, col4 = st.columns([1, 1])
+        with col3:
+            if st.button("Previous") and st.session_state.index > 0:
+                st.session_state.index -= 1
+        with col4:
+            if st.button("Next") and st.session_state.index < len(df) - 1:
+                st.session_state.index += 1
+    with col2:
+        st.subheader(article['title'])
+        st.markdown(article['description'])
+        st.markdown(f"[Read more]({article['url']})")
+
+    # Navigation buttons
+    
+          
+ 
     
     # Get user inputs from sidebar
     selected_tickers, selected_sources, days_back, min_sentiment = show_sidebar()
