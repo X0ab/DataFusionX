@@ -11,7 +11,7 @@ class AlphaVantageFetcher(BaseNewsFetcher):
     def fetch_news(self, tickers, start_date, end_date):
         params = {
             'function': 'NEWS_SENTIMENT', #TOP_GAINERS_LOSERS
-            'tickers': "IBM" ,#",".join(tickers),
+            'tickers':  ",".join(tickers),
             'apikey': self.api_key,
             'time_from': start_date.strftime('%Y%m%dT%H%M'),
             'time_to': end_date.strftime('%Y%m%dT%H%M'),
