@@ -8,6 +8,14 @@ import matplotlib.pyplot as plt
 import nltk
 from nltk.corpus import stopwords
 from collections import defaultdict
+import typer
+#from analyzers.sentiment_analyzer import SentimentAnalyzer
+#from news_fetchers.alpha_vantage import AlphaVantageFetcher
+from visualization.dashboard import create_dashboard
+import dash
+
+
+app = typer.Typer(help="Data FusX Workflow - fetching and vis tools.")
 
 # Load NLP models
 nlp = spacy.load("en_core_web_sm")
@@ -193,8 +201,9 @@ class FinancialNewsSentimentAnalyzer:
         plt.show()
 
 
-# Example Usage
-if __name__ == "__main__":
+
+@app.command()
+def main() : 
     # Replace with your actual API keys
     api_keys = {
         'alpha_vantage': '123abc456def789ghi',   # CHANGE ME to actual key
@@ -228,3 +237,22 @@ if __name__ == "__main__":
         print("\nResults saved to financial_news_sentiment.csv")
     else:
         print("No news articles fetched")
+
+    fetcher = AlphaVantageFetcher(api_keys['alpha_vantage'])
+    analyzer = SentimentAnalyzer()
+    
+    # Fetch and process news
+    news_df = fetcher.fetch_news(tech_tickers, days_back=7)
+    processed_news = analyzer.process_news(news_df)
+    aggregated = analyzer.aggregate_sentiment_by_ticker(processed_news)
+    
+    # Create and run dashboard
+    app = create_dashboard(processed_news, aggregated)
+    app.run_server(debug=True, port=8050)
+
+def run():
+    app()
+
+
+if __name__ == "__main__":
+    run()
