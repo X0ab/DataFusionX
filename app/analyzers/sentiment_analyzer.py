@@ -1,7 +1,7 @@
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from textblob import TextBlob
 import pandas as pd
-from config.settings import Config
+from config.settings import API_KEYS, DATABASE_CONFIG , Config
 
 class SentimentAnalyzer:
     def __init__(self):

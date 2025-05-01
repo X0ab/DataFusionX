@@ -1,7 +1,11 @@
 import requests
 from datetime import datetime
-
-class NewsAPIFetcher:
+import requests
+import pandas as pd
+from datetime import datetime
+from ..config import settings
+from .base_fetcher import BaseNewsFetcher
+class NewsFetcher:
     def __init__(self, api_key):
         self.api_key = api_key
         self.endpoint = 'https://newsapi.org/v2/top-headlines?country=us&category=business' #everything
@@ -96,3 +100,61 @@ class NewsAPIFetcher:
                 print(f"Failed to fetch news for {query}: {response.status_code}")
 
         return all_articles
+
+
+
+class NewsAPIFetcher(BaseNewsFetcher):
+    def __init__(self, api_key):
+        super().__init__(api_key)
+        self.base_url = "https://newsapi.org/v2/everything"
+    
+    def fetch_news(self, tickers, start_date, end_date):
+        """Fetch news from NewsAPI"""
+        query = " OR ".join([f"${ticker}" for ticker in tickers[:settings.MAX_TICKERS_PER_REQUEST]])
+        params = {
+            'q': query,
+            'from': start_date.strftime('%Y-%m-%d'),
+            'to': end_date.strftime('%Y-%m-%d'),
+            'apiKey': self.api_key,
+            'pageSize': 100,  # Max for free tier
+            'language': 'en',
+            'sortBy': 'publishedAt'
+        }
+        
+        try:
+            response = requests.get(self.base_url, params=params)
+            response.raise_for_status()
+            return self._parse_response(response.json())
+        except Exception as e:
+            print(f"NewsAPI error: {str(e)}")
+            return pd.DataFrame()
+
+    def _parse_response(self, data):
+        """Parse NewsAPI response"""
+        if not data or 'articles' not in data:
+            return pd.DataFrame()
+            
+        articles = []
+        for item in data.get('articles', []):
+            try:
+                published_date = self._parse_date(item['publishedAt'], '%Y-%m-%dT%H:%M:%SZ')
+                if not published_date:
+                    continue
+                    
+                article = {
+                    'source': 'newsapi',
+                    'title': item.get('title', ''),
+                    'url': item.get('url', ''),
+                    'content': item.get('content', item.get('description', '')),
+                    'source_name': item.get('source', {}).get('name', ''),
+                    'published': published_date,
+                    'tickers': [],  # NewsAPI doesn't provide ticker info
+                    'sentiment_score': 0,  # Will be calculated later
+                    'type': 'news'
+                }
+                articles.append(article)
+            except Exception as e:
+                print(f"Error parsing NewsAPI article: {str(e)}")
+                continue
+                
+        return self._to_dataframe(articles)

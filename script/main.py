@@ -213,7 +213,7 @@ def main() :
     analyzer = FinancialNewsSentimentAnalyzer(api_keys)
     
     # Fetch news for some tech stocks
-    tech_tickers = "AAPL,MSFT,GOOGL,AMZN,TSLA"
+    tech_tickers = "IBM,AAPL,MSFT,GOOGL,AMZN,TSLA"
     
     print("Fetching news from Alpha Vantage...")
     alpha_news = analyzer.fetch_news('alpha_vantage', tech_tickers, days_back=3)

@@ -22,6 +22,7 @@ st.set_page_config(
 def fetch_data(tickers, days_back):
     """Fetch news data with caching"""
     fetcher = AlphaVantageFetcher(config.API_KEYS['alpha_vantage'])
+    
     end_date = datetime.now()
     start_date = end_date - timedelta(days=days_back)
     return fetcher.fetch_news(tickers, start_date, end_date)
@@ -322,7 +323,7 @@ def main():
     
     #news = fetch_news_api(config.DEFAULT_TICKERS, config.TIME_WINDOW.days)
      
-    csv_path = "data/convertcsv.csv"  # Replace with the actual path to the CSV file
+    csv_path = "app/data/convertcsv.csv"  # Replace with the actual path to the CSV file
     news_df = pd.read_csv(csv_path)
     df = pd.DataFrame(news_df)
 
