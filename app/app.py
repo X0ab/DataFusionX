@@ -73,4 +73,32 @@ def fetch_newsapi_articles(tickers, days_back):
         st.warning(f"NewsAPI Error: {str(e)}")
     return pd.DataFrame()
 
- 
+def fetch_alphavantage_news(tickers, days_back):
+    """Fetch news from Alpha Vantage with enhanced error handling"""
+    try:
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=days_back)
+        
+        base_url = "https://www.alphavantage.co/query"
+        params = {
+            "function": "NEWS_SENTIMENT",
+            "apikey": API_CONFIG["alphavantage"],
+            "tickers": ",".join(tickers),
+            "time_from": start_date.strftime('%Y%m%dT0000'),
+            "time_to": end_date.strftime('%Y%m%dT2359'),
+            "limit": 1000  # Max allowed by Alpha Vantage
+        }
+        
+        response = requests.get(base_url, params=params)
+        response.raise_for_status()
+        data = response.json()
+        
+        if 'feed' in data:
+            return pd.DataFrame(data['feed'])
+        st.warning("AlphaVantage returned no news feed")
+    except requests.exceptions.RequestException as e:
+        st.warning(f"AlphaVantage request failed: {str(e)}")
+    except Exception as e:
+        st.warning(f"AlphaVantage processing error: {str(e)}")
+    return pd.DataFrame()
+
