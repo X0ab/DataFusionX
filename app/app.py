@@ -185,3 +185,28 @@ def normalize_data(df, source):
         st.warning(f"Error normalizing {source} data: {str(e)}")
         return pd.DataFrame()
 
+def update_data_store(new_data):
+    """Update or create the CSV file with new data, with better deduplication"""
+    try:
+        if os.path.exists(DATA_FILE):
+            existing_data = pd.read_csv(DATA_FILE, parse_dates=['published'])
+            # Combine and deduplicate based on title + source + published date
+            combined_data = pd.concat([existing_data, new_data])
+            combined_data = combined_data.drop_duplicates(
+                subset=['title', 'source', 'published'],
+                keep='last'
+            )
+        else:
+            combined_data = new_data
+        
+        # Ensure directory exists
+        os.makedirs(DATA_DIR, exist_ok=True)
+        
+        # Save with proper date formatting
+        combined_data.to_csv(DATA_FILE, index=False, date_format='%Y-%m-%d %H:%M:%S')
+        return combined_data
+    
+    except Exception as e:
+        st.error(f"Error updating data store: {str(e)}")
+        return new_data
+
