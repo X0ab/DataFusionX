@@ -210,3 +210,31 @@ def update_data_store(new_data):
         st.error(f"Error updating data store: {str(e)}")
         return new_data
 
+def analyze_sentiment(df):
+    """Perform sentiment analysis with enhanced text preprocessing"""
+    if df.empty:
+        return df
+    
+    try:
+        sentiments = []
+        for content in df['content'].fillna(''):
+            # Basic text cleaning
+            clean_content = ' '.join(str(content).split())  # Remove extra whitespace
+            sentiments.append(analyzer.polarity_scores(clean_content))
+        
+        sentiment_df = pd.DataFrame(sentiments)
+        df = pd.concat([df, sentiment_df], axis=1)
+        
+        # Add sentiment label with more nuanced thresholds
+        df['sentiment_label'] = df['compound'].apply(
+            lambda x: 'positive' if x > 0.15 else (
+                'negative' if x < -0.15 else 'neutral'
+            )
+        )
+        
+        return df
+    
+    except Exception as e:
+        st.error(f"Sentiment analysis failed: {str(e)}")
+        return df
+
