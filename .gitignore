@@ -5,3 +5,5 @@ json
 script/test
 *.pyc
 app/data/
+/data
+*.db
