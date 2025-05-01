@@ -102,3 +102,36 @@ def fetch_alphavantage_news(tickers, days_back):
         st.warning(f"AlphaVantage processing error: {str(e)}")
     return pd.DataFrame()
 
+def fetch_finnhub_news(tickers, days_back):
+    """Fetch news from Finnhub with better error handling"""
+    try:
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=days_back)
+        
+        base_url = "https://finnhub.io/api/v1/company-news"
+        all_articles = []
+        
+        for ticker in tickers:
+            params = {
+                "symbol": ticker,
+                "from": start_date.strftime('%Y-%m-%d'),
+                "to": end_date.strftime('%Y-%m-%d'),
+                "token": API_CONFIG["finnhub"]
+            }
+            response = requests.get(base_url, params=params)
+            response.raise_for_status()
+            articles = response.json()
+            
+            if isinstance(articles, list):
+                # Add ticker info to each article
+                for article in articles:
+                    article['related_tickers'] = [ticker]
+                all_articles.extend(articles)
+        
+        return pd.DataFrame(all_articles)
+    except requests.exceptions.RequestException as e:
+        st.warning(f"Finnhub request failed: {str(e)}")
+    except Exception as e:
+        st.warning(f"Finnhub processing error: {str(e)}")
+    return pd.DataFrame()
+
