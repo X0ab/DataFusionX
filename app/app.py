@@ -136,7 +136,7 @@ def fetch_finnhub_news(tickers, days_back):
     return pd.DataFrame()
 
 def normalize_data(df, source):
-    """Normalize data from different APIs to common format with better type handling"""
+    """Normalize data from different APIs to common format with better datetime handling"""
     if df.empty:
         return df
     
@@ -147,7 +147,7 @@ def normalize_data(df, source):
                 'content': df['description'].fillna('').astype(str),
                 'source': df['source'].apply(
                     lambda x: x.get('name', 'Unknown') if isinstance(x, dict) else str(x)),
-                'published': pd.to_datetime(df['publishedAt'], errors='coerce'),
+                'published': pd.to_datetime(df['publishedAt'], utc=True, errors='coerce'),
                 'url': df['url'].astype(str),
                 'urlToImage': df['urlToImage'].fillna('').astype(str),
                 'tickers': df['related_tickers'].apply(lambda x: x if isinstance(x, list) else [])
@@ -158,7 +158,7 @@ def normalize_data(df, source):
                 'title': df['title'].astype(str),
                 'content': df['summary'].fillna('').astype(str),
                 'source': df['source'].fillna('Unknown').astype(str),
-                'published': pd.to_datetime(df['time_published'], errors='coerce'),
+                'published': pd.to_datetime(df['time_published'], format='%Y%m%dT%H%M%S', utc=True, errors='coerce'),
                 'url': df['url'].astype(str),
                 'urlToImage': '',
                 'tickers': df.get('ticker_sentiment', []).apply(
@@ -170,27 +170,28 @@ def normalize_data(df, source):
                 'title': df['headline'].astype(str),
                 'content': df['summary'].fillna('').astype(str),
                 'source': df['source'].fillna('Unknown').astype(str),
-                'published': pd.to_datetime(df['datetime'], unit='s', errors='coerce'),
+                'published': pd.to_datetime(df['datetime'], unit='s', utc=True, errors='coerce'),
                 'url': df['url'].astype(str),
                 'urlToImage': df['image'].fillna('').astype(str),
                 'tickers': df['related_tickers'].apply(lambda x: x if isinstance(x, list) else [])
             })
         
         # Clean and filter the normalized data
-        normalized = normalized.dropna(subset=['published'])
         normalized = normalized[normalized['published'].notna()]
         return normalized
     
     except Exception as e:
         st.warning(f"Error normalizing {source} data: {str(e)}")
         return pd.DataFrame()
-
 def update_data_store(new_data):
-    """Update or create the CSV file with new data, with better deduplication"""
+    """Update or create the CSV file with new data, with better datetime handling"""
     try:
         if os.path.exists(DATA_FILE):
-            existing_data = pd.read_csv(DATA_FILE, parse_dates=['published'])
-            # Combine and deduplicate based on title + source + published date
+            existing_data = pd.read_csv(DATA_FILE)
+            # Convert published column to datetime if it's not already
+            if 'published' in existing_data.columns:
+                existing_data['published'] = pd.to_datetime(existing_data['published'], utc=True, errors='coerce')
+            # Combine and deduplicate
             combined_data = pd.concat([existing_data, new_data])
             combined_data = combined_data.drop_duplicates(
                 subset=['title', 'source', 'published'],
@@ -202,8 +203,8 @@ def update_data_store(new_data):
         # Ensure directory exists
         os.makedirs(DATA_DIR, exist_ok=True)
         
-        # Save with proper date formatting
-        combined_data.to_csv(DATA_FILE, index=False, date_format='%Y-%m-%d %H:%M:%S')
+        # Save with ISO format datetime
+        combined_data.to_csv(DATA_FILE, index=False)
         return combined_data
     
     except Exception as e:
@@ -211,33 +212,74 @@ def update_data_store(new_data):
         return new_data
 
 def analyze_sentiment(df):
-    """Perform sentiment analysis with enhanced text preprocessing"""
+    """Perform sentiment analysis with proper index handling"""
     if df.empty:
         return df
     
     try:
+        # Reset index to ensure uniqueness
+        df = df.reset_index(drop=True)
+        
+        # Ensure we have text content to analyze
+        if 'content' not in df.columns:
+            st.warning("No content column available for sentiment analysis")
+            return df
+        
         sentiments = []
         for content in df['content'].fillna(''):
-            # Basic text cleaning
-            clean_content = ' '.join(str(content).split())  # Remove extra whitespace
-            sentiments.append(analyzer.polarity_scores(clean_content))
+            try:
+                # Basic text cleaning
+                clean_content = ' '.join(str(content).split())  # Remove extra whitespace
+                sentiments.append(analyzer.polarity_scores(clean_content))
+            except Exception as e:
+                st.warning(f"Error analyzing sentiment for content: {str(e)}")
+                # Append neutral sentiment if analysis fails
+                sentiments.append({'neg': 0, 'neu': 1, 'pos': 0, 'compound': 0})
         
         sentiment_df = pd.DataFrame(sentiments)
-        df = pd.concat([df, sentiment_df], axis=1)
         
-        # Add sentiment label with more nuanced thresholds
-        df['sentiment_label'] = df['compound'].apply(
-            lambda x: 'positive' if x > 0.15 else (
-                'negative' if x < -0.15 else 'neutral'
-            )
-        )
+        # Check if we got any sentiment data
+        if not sentiment_df.empty:
+            # Reset index before concatenation
+            sentiment_df = sentiment_df.reset_index(drop=True)
+            df = df.reset_index(drop=True)
+            
+            # Concatenate with the original DataFrame
+            df = pd.concat([df, sentiment_df], axis=1)
+            
+            # Add sentiment label with more nuanced thresholds
+            if 'compound' in df.columns:
+                df['sentiment_label'] = df['compound'].apply(
+                    lambda x: 'positive' if x > 0.15 else (
+                        'negative' if x < -0.15 else 'neutral'
+                    )
+                )
+            else:
+                st.warning("No compound sentiment scores were generated")
+                df['sentiment_label'] = 'neutral'
+                df['compound'] = 0
+        else:
+            st.warning("Sentiment analysis returned no results")
+            df['sentiment_label'] = 'neutral'
+            df['compound'] = 0
+            df['neg'] = 0
+            df['neu'] = 0
+            df['pos'] = 0
         
         return df
     
     except Exception as e:
         st.error(f"Sentiment analysis failed: {str(e)}")
+        # Add default sentiment columns if analysis completely fails
+        if 'compound' not in df.columns:
+            df['compound'] = 0
+            df['neg'] = 0
+            df['neu'] = 0
+            df['pos'] = 0
+            df['sentiment_label'] = 'neutral'
         return df
-
+    
+      
 def show_sidebar():
     """Render the sidebar controls with enhanced layout"""
     with st.sidebar:
@@ -290,9 +332,27 @@ def show_main_content(df, min_sentiment):
         st.warning("No news articles match your filters")
         return
     
+    if 'compound' not in df.columns:
+        st.error("Sentiment analysis data not available - showing all articles")
+        filtered_df = df
+    else:
+        # Filter by sentiment
+        filtered_df = df[df['compound'] >= min_sentiment]
+
     # Filter by sentiment
-    df = df[df['compound'] >= min_sentiment]
+    #df = df[df['compound'] >= min_sentiment]
+    if filtered_df.empty:
+        st.warning("No articles match your sentiment filter")
+        return
     
+    # Convert published column to datetime if it's not already
+    if not pd.api.types.is_datetime64_any_dtype(filtered_df['published']):
+        filtered_df['published'] = pd.to_datetime(filtered_df['published'], utc=True, errors='coerce')
+    
+    # Extract date for grouping
+    filtered_df['date'] = filtered_df['published'].dt.date
+
+
     # Display metrics with icons
     st.subheader("📊 Summary Metrics")
     col1, col2, col3, col4 = st.columns(4)
