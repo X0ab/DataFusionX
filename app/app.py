@@ -135,3 +135,53 @@ def fetch_finnhub_news(tickers, days_back):
         st.warning(f"Finnhub processing error: {str(e)}")
     return pd.DataFrame()
 
+def normalize_data(df, source):
+    """Normalize data from different APIs to common format with better type handling"""
+    if df.empty:
+        return df
+    
+    try:
+        if source == "newsapi":
+            normalized = pd.DataFrame({
+                'title': df['title'].astype(str),
+                'content': df['description'].fillna('').astype(str),
+                'source': df['source'].apply(
+                    lambda x: x.get('name', 'Unknown') if isinstance(x, dict) else str(x)),
+                'published': pd.to_datetime(df['publishedAt'], errors='coerce'),
+                'url': df['url'].astype(str),
+                'urlToImage': df['urlToImage'].fillna('').astype(str),
+                'tickers': df['related_tickers'].apply(lambda x: x if isinstance(x, list) else [])
+            })
+        
+        elif source == "alphavantage":
+            normalized = pd.DataFrame({
+                'title': df['title'].astype(str),
+                'content': df['summary'].fillna('').astype(str),
+                'source': df['source'].fillna('Unknown').astype(str),
+                'published': pd.to_datetime(df['time_published'], errors='coerce'),
+                'url': df['url'].astype(str),
+                'urlToImage': '',
+                'tickers': df.get('ticker_sentiment', []).apply(
+                    lambda x: [item['ticker'] for item in x] if isinstance(x, list) else [])
+            })
+        
+        elif source == "finnhub":
+            normalized = pd.DataFrame({
+                'title': df['headline'].astype(str),
+                'content': df['summary'].fillna('').astype(str),
+                'source': df['source'].fillna('Unknown').astype(str),
+                'published': pd.to_datetime(df['datetime'], unit='s', errors='coerce'),
+                'url': df['url'].astype(str),
+                'urlToImage': df['image'].fillna('').astype(str),
+                'tickers': df['related_tickers'].apply(lambda x: x if isinstance(x, list) else [])
+            })
+        
+        # Clean and filter the normalized data
+        normalized = normalized.dropna(subset=['published'])
+        normalized = normalized[normalized['published'].notna()]
+        return normalized
+    
+    except Exception as e:
+        st.warning(f"Error normalizing {source} data: {str(e)}")
+        return pd.DataFrame()
+
