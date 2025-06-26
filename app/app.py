@@ -183,6 +183,7 @@ class AlphaVantageFetcher:
             st.error(f"Alpha Vantage API Request Failed: {str(e)}")
             return pd.DataFrame()
 
+# In the NewsAPIFetcher class, modify the fetch_news method:
 class NewsAPIFetcher:
     def __init__(self, api_key: str):
         self.api_key = api_key
@@ -204,7 +205,7 @@ class NewsAPIFetcher:
                 "pageSize": 100
             }
             
-            response = requests.get(self.base_url, params=params)
+            response = requests.get(self.base_url, params=params, timeout=10)
             response.raise_for_status()
             data = response.json()
             
@@ -219,8 +220,13 @@ class NewsAPIFetcher:
                 
             df['published'] = pd.to_datetime(df['publishedAt'])
             df['source'] = df['source'].apply(lambda x: x.get('name', 'Unknown'))
-            df['title'] = df.get('title', '')
-            df['text'] = df.get('description', '') + " " + df.get('content', '')
+            
+            # Handle potential NaN/float values in text fields
+            df['title'] = df.get('title', '').apply(lambda x: str(x) if pd.notna(x) else '')
+            df['description'] = df.get('description', '').apply(lambda x: str(x) if pd.notna(x) else '')
+            df['content'] = df.get('content', '').apply(lambda x: str(x) if pd.notna(x) else '')
+            
+            df['text'] = (df['description'] + " " + df['content']).str.strip()
             df['url'] = df.get('url', '')
             df['image'] = df.get('urlToImage', '')
             
@@ -231,7 +237,11 @@ class NewsAPIFetcher:
             if tickers:
                 tickers_lower = [t.lower() for t in tickers]
                 for i, row in df.iterrows():
-                    content = (row['title'] + ' ' + row['text']).lower()
+                    # Safely handle text concatenation
+                    title = str(row['title']) if pd.notna(row['title']) else ''
+                    text = str(row['text']) if pd.notna(row['text']) else ''
+                    content = (title + ' ' + text).lower()
+                    
                     matched_tickers = [
                         tickers[i] for i, t in enumerate(tickers_lower) 
                         if f"${t}" in content or t in content
@@ -245,7 +255,7 @@ class NewsAPIFetcher:
         except requests.exceptions.RequestException as e:
             st.error(f"NewsAPI Request Failed: {e}")
             return pd.DataFrame()
-
+        
 # Add this new function
 def check_api_status(config: Config) -> Dict[str, bool]:
     """Check status of all APIs"""
