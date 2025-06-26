@@ -21,8 +21,8 @@ class Config:
             'Technology': ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'IBM'],
             'Finance': ['JPM', 'BAC', 'GS', 'MS', 'C'],
             'Energy': ['XOM', 'CVX', 'COP', 'SLB', 'EOG'],
-            'Cryptocurrency': ['BTC', 'ETH', 'ADA', 'DOGE'],  # Finnhub format
-            'Forex': ['USD', 'EUR', 'GBP', 'JPY']  # Finnhub format
+            'Cryptocurrency': ['BTC', 'ETH', 'ADA', 'DOGE'],
+            'Forex': ['USD', 'EUR', 'GBP', 'JPY']
         }
         self.SOURCES = [
             'Bloomberg', 'Reuters', 'CNBC', 
@@ -99,18 +99,26 @@ class FinnhubFetcher:
             df['url'] = df.get('url', '')
             df['image'] = df.get('image', '')
             
+            # Initialize empty list column for tickers
+            df['tickers'] = [[] for _ in range(len(df))]
+            
+            # Filter by tickers if provided
+            if tickers:
+                tickers_lower = [t.lower() for t in tickers]
+                
+                for i, row in df.iterrows():
+                    content = (row['title'] + ' ' + row['text']).lower()
+                    matched_tickers = [
+                        tickers[i] for i, t in enumerate(tickers_lower) 
+                        if t in content
+                    ]
+                    df.at[i, 'tickers'] = matched_tickers
+                
+                # Remove rows with no matching tickers
+                df = df[df['tickers'].apply(len) > 0]
+            
             # Filter by date
             df = df[(df['published'] >= start_date) & (df['published'] <= end_date)]
-            
-            # Filter by tickers
-            if tickers:
-                df['tickers'] = df.apply(
-                    lambda row: [t for t in tickers 
-                               if str(t).lower() in row['title'].lower() 
-                               or str(t).lower() in row['text'].lower()],
-                    axis=1
-                )
-                df = df[df['tickers'].apply(len) > 0]
             
             return df
             
@@ -210,10 +218,22 @@ class NewsAPIFetcher:
             df['text'] = df.get('description', '') + " " + df.get('content', '')
             df['url'] = df.get('url', '')
             df['image'] = df.get('urlToImage', '')
-            df['tickers'] = df.apply(
-                lambda row: [t for t in tickers if str(t).lower() in row['title'].lower()],
-                axis=1
-            )
+            
+            # Initialize tickers column
+            df['tickers'] = [[] for _ in range(len(df))]
+            
+            # Find matching tickers
+            if tickers:
+                tickers_lower = [t.lower() for t in tickers]
+                for i, row in df.iterrows():
+                    content = (row['title'] + ' ' + row['text']).lower()
+                    matched_tickers = [
+                        tickers[i] for i, t in enumerate(tickers_lower) 
+                        if f"${t}" in content or t in content
+                    ]
+                    df.at[i, 'tickers'] = matched_tickers
+                
+                df = df[df['tickers'].apply(len) > 0]
             
             return df
             
@@ -223,37 +243,31 @@ class NewsAPIFetcher:
 
 def show_sidebar(config: Config):
     with st.sidebar:
-        st.header("📊 Analysis Settings")
+        st.header("Analysis Settings")
         
-        # API status
+        # API status check
         try:
             test_finnhub = requests.get(f"https://finnhub.io/api/v1/stock/symbol?exchange=US&token={config.API_KEYS['finnhub']}")
-            if test_finnhub.status_code == 200:
-                st.success("Finnhub API: Online")
-            else:
-                st.error("Finnhub API: Limited (check usage)")
+            status = "🟢 Online" if test_finnhub.status_code == 200 else "🟠 Limited"
+            st.markdown(f"**Finnhub API:** {status}")
         except:
-            st.error("Finnhub API: Offline")
+            st.markdown("**Finnhub API:** 🔴 Offline")
         
         # Topic selection
         selected_topic = st.selectbox(
             "Select Market Sector",
-            options=list(TOPICS.keys()),
+            options=list(config.TOPICS.keys()),
             index=0
         )
         
+        # Ticker selection
         selected_tickers = st.multiselect(
             "Select Tickers",
-            options=TOPICS[selected_topic],
-            default=TOPICS[selected_topic][:3]
+            options=config.TOPICS[selected_topic],
+            default=config.TOPICS[selected_topic][:3]
         )
         
-        days_back = st.slider(
-            "Analysis Period (Days)",
-            1, 30, 7
-        )
-        st.caption(f"Analyzing from {(datetime.now() - timedelta(days=days_back)).strftime('%Y-%m-%d')} to {datetime.now().strftime('%Y-%m-%d')}")
-        
+        # Source filtering
         selected_sources = st.multiselect(
             "Filter by Sources",
             options=config.SOURCES,
@@ -547,7 +561,7 @@ def fetch_data_from_csv(uploaded_file, days_back=7):
         if 'url' not in df.columns:
             df['url'] = ''
         if 'tickers' not in df.columns:
-            df['tickers'] = [[]] * len(df)
+            df['tickers'] = [[] for _ in range(len(df))]
         
         return df
     
@@ -567,130 +581,28 @@ def show_main_content(df: pd.DataFrame, min_sentiment: float):
         return
     
     col1, col2, col3, col4 = st.columns(4)
-    avg_sentiment = df['compound'].mean()
-    col1.metric("📈 Average Sentiment", 
-               f"{avg_sentiment:.2f}", 
+    avg_sentiment = df['vader_compound'].mean()
+    col1.metric("Average Sentiment", f"{avg_sentiment:.2f}", 
                "Positive" if avg_sentiment > 0 else "Negative")
-    col2.metric("📰 Total Articles", len(df))
-    col3.metric("🏢 Sources", df['source'].nunique())
-    col4.metric("💵 Tickers Covered", df['tickers'].explode().nunique())
+    col2.metric("Total Articles", len(df))
+    col3.metric("Sources", df['source'].nunique())
+    col4.metric("Tickers Covered", df['tickers'].explode().nunique())
     
     tab1, tab2, tab3, tab4 = st.tabs([
-        "📈 Sentiment Trends", 
-        "🏷️ Ticker Analysis", 
+        "📈 Sentiment Analysis", 
+        "🏷️ Ticker Comparison", 
         "📰 Source Insights", 
-        "📋 Article Data"
+        "📋 Raw Data"
     ])
     
     with tab1:
-        st.subheader("📈 Sentiment Over Time")
-        df['date'] = pd.to_datetime(df['published']).dt.date
-        daily_sentiment = df.groupby(['date', 'sentiment_label']).size().unstack().fillna(0)
-        
-        fig1 = px.area(
-            daily_sentiment,
-            title="Daily Sentiment Trend",
-            labels={'value': 'Number of Articles', 'date': 'Date'},
-            color_discrete_map={
-                'positive': '#2ecc71',
-                'neutral': '#f1c40f',
-                'negative': '#e74c3c'
-            }
-        )
-        fig1.update_layout(hovermode="x unified", legend_title="Sentiment")
-        st.plotly_chart(fig1, use_container_width=True)
-        
-        st.subheader("📊 Sentiment Distribution")
-        fig2 = px.histogram(
-            df,
-            x='compound',
-            nbins=20,
-            title="Sentiment Score Distribution",
-            labels={'compound': 'Sentiment Score'},
-            color='sentiment_label',
-            color_discrete_map={
-                'positive': '#2ecc71',
-                'neutral': '#f1c40f',
-                'negative': '#e74c3c'
-            }
-        )
-        st.plotly_chart(fig2, use_container_width=True)
+        show_sentiment_analysis(df)
     
     with tab2:
-        st.subheader("🏷️ Ticker Sentiment Comparison")
-        try:
-            exploded_df = df.explode('tickers')
-            exploded_df = exploded_df[exploded_df['tickers'].notna()]
-            
-            if not exploded_df.empty:
-                ticker_sentiment = exploded_df.groupby('tickers', observed=True).agg(
-                    mean_sentiment=('compound', 'mean'),
-                    article_count=('title', 'count')
-                ).sort_values('mean_sentiment')
-                
-                fig = px.bar(
-                    ticker_sentiment,
-                    x='mean_sentiment',
-                    y=ticker_sentiment.index,
-                    orientation='h',
-                    color='mean_sentiment',
-                    color_continuous_scale='RdYlGn',
-                    title="Average Sentiment by Ticker",
-                    labels={'mean_sentiment': 'Sentiment Score', 'index': 'Ticker'},
-                    hover_data=['article_count'],
-                    height=600
-                )
-                fig.update_layout(
-                    coloraxis_showscale=False,
-                    yaxis={'categoryorder': 'total ascending'},
-                    xaxis_range=[-1, 1]
-                )
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.warning("No ticker data available after processing")
-        except Exception as e:
-            st.error(f"Error in ticker comparison: {str(e)}")
+        show_ticker_comparison(df)
     
     with tab3:
-        st.subheader("📰 Source Analysis")
-        
-        source_col1, source_col2 = st.columns(2)
-        
-        with source_col1:
-            st.markdown("#### Top Sources by Volume")
-            source_counts = df['source'].value_counts().nlargest(10)
-            fig1 = px.pie(
-                source_counts,
-                names=source_counts.index,
-                values=source_counts.values,
-                title="Top News Sources"
-            )
-            st.plotly_chart(fig1, use_container_width=True)
-        
-        with source_col2:
-            st.markdown("#### Sentiment by Source")
-            source_stats = df.groupby('source').agg({
-                'compound': 'mean',
-                'title': 'count'
-            }).sort_values('title', ascending=False).head(10)
-            
-            fig2 = px.bar(
-                source_stats,
-                x='compound',
-                y=source_stats.index,
-                orientation='h',
-                color='compound',
-                color_continuous_scale='RdYlGn',
-                title="Average Sentiment by Source",
-                labels={'compound': 'Avg. Sentiment', 'y': 'Source'},
-                hover_data=['title']
-            )
-            fig2.update_layout(
-                coloraxis_showscale=True,
-                yaxis={'categoryorder': 'total ascending'},
-                xaxis_range=[-1, 1]
-            )
-            st.plotly_chart(fig2, use_container_width=True)
+        show_source_analysis(df)
     
     with tab4:
         filtered_df = show_raw_data(df)
