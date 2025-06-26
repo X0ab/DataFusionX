@@ -322,7 +322,7 @@ def main():
     
     #news = fetch_news_api(config.DEFAULT_TICKERS, config.TIME_WINDOW.days)
      
-    csv_path = "data/convertcsv.csv"  # Replace with the actual path to the CSV file
+    csv_path = "app/data/convertcsv.csv"  # Replace with the actual path to the CSV file
     news_df = pd.read_csv(csv_path)
     df = pd.DataFrame(news_df)
 
