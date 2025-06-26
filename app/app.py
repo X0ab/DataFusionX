@@ -287,11 +287,11 @@ def show_sidebar(config: Config):
         # Display status indicators
         #col1, col2, col3 = st.columns(3)
         #with col1:
-        st.markdown(f"**Finnhub**: {'🟢 🟢Online' if api_status['finnhub'] else '🔴'}")
+        st.markdown(f"**Finnhub**: {'🟢 Online' if api_status['finnhub'] else '🔴'}")
         #with col2:
-        st.markdown(f"**Alpha Vantage**: {'🟢 🟢Online' if api_status['alpha_vantage'] else '🔴'}")
+        st.markdown(f"**Alpha Vantage**: {'🟢Online' if api_status['alpha_vantage'] else '🔴'}")
         #with col3:
-        st.markdown(f"**NewsAPI**: {'🟢 🟢Online' if api_status['newsapi'] else '🔴'}")
+        st.markdown(f"**NewsAPI**: {'🟢Online' if api_status['newsapi'] else '🔴'}")
         
         # Add usage warning if any API is down
         if not all(api_status.values()):
