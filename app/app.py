@@ -297,11 +297,11 @@ def show_news_swiper(df: pd.DataFrame):
         with nav_col1:
             if st.button("⏮️ Previous") and st.session_state.index > 0:
                 st.session_state.index -= 1
-                st.experimental_rerun()
+                st.rerun()  # Changed from st.experimental_rerun()
         with nav_col2:
             if st.button("⏭️ Next") and st.session_state.index < len(df) - 1:
                 st.session_state.index += 1
-                st.experimental_rerun()
+                st.rerun()  # Changed from st.experimental_rerun()
     
     with col2:
         st.subheader(article['title'])
@@ -326,7 +326,6 @@ def show_news_swiper(df: pd.DataFrame):
                 st.caption(f"📊 Tickers: {tickers}")
         
         st.markdown(f"[Read full article ↗️]({article['url']})")
-
 def show_sentiment_analysis(df: pd.DataFrame):
     """Sentiment trends and distributions"""
     st.subheader("Sentiment Over Time")
