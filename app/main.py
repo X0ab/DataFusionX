@@ -1,43 +1,68 @@
 from datetime import datetime, timedelta
-from news_fetchers.alpha_vantage import AlphaVantageFetcher
-from analyzers.sentiment_analyzer import SentimentAnalyzer
-from config.settings import Config
 import pandas as pd
+from config import settings
+from fetchers.multi_source import MultiSourceFetcher
+from processors.sentiment import SentimentAnalyzer
+from processors.cleaner import DataCleaner
+from storage.database import DatabaseStorage
 
-def main():
-    config = Config()
+class FinancialNewsAggregator:
+    def __init__(self):
+        self.fetcher = MultiSourceFetcher(settings.API_KEYS)
+        self.sentiment_analyzer = SentimentAnalyzer()
+        self.data_cleaner = DataCleaner()
+        self.storage = DatabaseStorage()
     
-    print("Initializing components...")
-    fetcher = AlphaVantageFetcher(config.API_KEYS['alpha_vantage'])
-    analyzer = SentimentAnalyzer()
-    
-    print("Setting time range...")
-    end_date = datetime.now()
-    start_date = end_date - config.TIME_WINDOW
-    
-    print("Fetching news...")
-    news_df = fetcher.fetch_news(config.DEFAULT_TICKERS, start_date, end_date)
-    
-    if news_df.empty:
-        print("No news articles were fetched. Check your API key and parameters.")
-        return
+    def fetch_and_store_news(self, tickers, days_back=7):
+        """Main method to fetch, process and store news"""
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=days_back)
         
-    print(f"Fetched {len(news_df)} articles. Columns: {news_df.columns.tolist()}")
-    
-    print("Analyzing sentiment...")
-    analyzed_df = analyzer.analyze_dataframe(news_df)
-    
-    if analyzed_df.empty:
-        print("Sentiment analysis failed. Check your data.")
-        return
+        print(f"Fetching news for {tickers} from {start_date} to {end_date}")
         
-    print("Analysis completed successfully!")
-    print("\nSample results:")
-    print(analyzed_df[['title', 'source', 'vader_compound', 'sentiment_label']].head())
+        # Fetch news from all sources
+        raw_data = self.fetcher.fetch_news(tickers, start_date, end_date)
+        
+        if raw_data.empty:
+            print("No new data fetched.")
+            return
+        
+        print(f"Fetched {len(raw_data)} items")
+        
+        # Clean data
+        cleaned_data = self.data_cleaner.clean_data(raw_data)
+        
+        # Analyze sentiment
+        analyzed_data = self.sentiment_analyzer.analyze_dataframe(cleaned_data)
+        
+        # Store data
+        self.storage.save_data(analyzed_data)
+        
+        # Cleanup old data
+        self.storage.cleanup_old_data(settings.DATA_STORAGE_DAYS)
+        
+        print(f"Successfully stored {len(analyzed_data)} items")
     
-    # Save results
-    analyzed_df.to_csv('financial_news_sentiment.csv', index=False)
-    print("\nResults saved to financial_news_sentiment.csv")
+    def get_news(self, tickers=None, days_back=7):
+        """Retrieve news from storage"""
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=days_back)
+        return self.storage.load_data(tickers, start_date, end_date)
 
 if __name__ == "__main__":
-    main()
+    aggregator = FinancialNewsAggregator()
+    
+    # Example usage
+    tickers_to_track = ['IBM','AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA']
+    
+    # Fetch and store new data
+    aggregator.fetch_and_store_news(tickers_to_track, days_back=3)
+    
+    # Retrieve stored data
+    stored_data = aggregator.get_news(tickers_to_track, days_back=3)
+    
+    if not stored_data.empty:
+        print("\nStored data sample:")
+        print(stored_data[['source', 'title', 'published', 'sentiment_score']].head())
+    else:
+        print("No data found in storage.")

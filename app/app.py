@@ -223,7 +223,7 @@ class NewsAPIFetcher:
 
 def show_sidebar(config: Config):
     with st.sidebar:
-        st.header("Analysis Settings")
+        st.header("📊 Analysis Settings")
         
         # API status
         try:
@@ -238,18 +238,22 @@ def show_sidebar(config: Config):
         # Topic selection
         selected_topic = st.selectbox(
             "Select Market Sector",
-            options=list(config.TOPICS.keys()),
+            options=list(TOPICS.keys()),
             index=0
         )
         
-        # Ticker selection
         selected_tickers = st.multiselect(
             "Select Tickers",
-            options=config.TOPICS[selected_topic],
-            default=config.TOPICS[selected_topic][:3]
+            options=TOPICS[selected_topic],
+            default=TOPICS[selected_topic][:3]
         )
         
-        # Source filtering
+        days_back = st.slider(
+            "Analysis Period (Days)",
+            1, 30, 7
+        )
+        st.caption(f"Analyzing from {(datetime.now() - timedelta(days=days_back)).strftime('%Y-%m-%d')} to {datetime.now().strftime('%Y-%m-%d')}")
+        
         selected_sources = st.multiselect(
             "Filter by Sources",
             options=config.SOURCES,
@@ -563,28 +567,130 @@ def show_main_content(df: pd.DataFrame, min_sentiment: float):
         return
     
     col1, col2, col3, col4 = st.columns(4)
-    avg_sentiment = df['vader_compound'].mean()
-    col1.metric("Average Sentiment", f"{avg_sentiment:.2f}", 
+    avg_sentiment = df['compound'].mean()
+    col1.metric("📈 Average Sentiment", 
+               f"{avg_sentiment:.2f}", 
                "Positive" if avg_sentiment > 0 else "Negative")
-    col2.metric("Total Articles", len(df))
-    col3.metric("Sources", df['source'].nunique())
-    col4.metric("Tickers Covered", df['tickers'].explode().nunique())
+    col2.metric("📰 Total Articles", len(df))
+    col3.metric("🏢 Sources", df['source'].nunique())
+    col4.metric("💵 Tickers Covered", df['tickers'].explode().nunique())
     
     tab1, tab2, tab3, tab4 = st.tabs([
-        "📈 Sentiment Analysis", 
-        "🏷️ Ticker Comparison", 
+        "📈 Sentiment Trends", 
+        "🏷️ Ticker Analysis", 
         "📰 Source Insights", 
-        "📋 Raw Data"
+        "📋 Article Data"
     ])
     
     with tab1:
-        show_sentiment_analysis(df)
+        st.subheader("📈 Sentiment Over Time")
+        df['date'] = pd.to_datetime(df['published']).dt.date
+        daily_sentiment = df.groupby(['date', 'sentiment_label']).size().unstack().fillna(0)
+        
+        fig1 = px.area(
+            daily_sentiment,
+            title="Daily Sentiment Trend",
+            labels={'value': 'Number of Articles', 'date': 'Date'},
+            color_discrete_map={
+                'positive': '#2ecc71',
+                'neutral': '#f1c40f',
+                'negative': '#e74c3c'
+            }
+        )
+        fig1.update_layout(hovermode="x unified", legend_title="Sentiment")
+        st.plotly_chart(fig1, use_container_width=True)
+        
+        st.subheader("📊 Sentiment Distribution")
+        fig2 = px.histogram(
+            df,
+            x='compound',
+            nbins=20,
+            title="Sentiment Score Distribution",
+            labels={'compound': 'Sentiment Score'},
+            color='sentiment_label',
+            color_discrete_map={
+                'positive': '#2ecc71',
+                'neutral': '#f1c40f',
+                'negative': '#e74c3c'
+            }
+        )
+        st.plotly_chart(fig2, use_container_width=True)
     
     with tab2:
-        show_ticker_comparison(df)
+        st.subheader("🏷️ Ticker Sentiment Comparison")
+        try:
+            exploded_df = df.explode('tickers')
+            exploded_df = exploded_df[exploded_df['tickers'].notna()]
+            
+            if not exploded_df.empty:
+                ticker_sentiment = exploded_df.groupby('tickers', observed=True).agg(
+                    mean_sentiment=('compound', 'mean'),
+                    article_count=('title', 'count')
+                ).sort_values('mean_sentiment')
+                
+                fig = px.bar(
+                    ticker_sentiment,
+                    x='mean_sentiment',
+                    y=ticker_sentiment.index,
+                    orientation='h',
+                    color='mean_sentiment',
+                    color_continuous_scale='RdYlGn',
+                    title="Average Sentiment by Ticker",
+                    labels={'mean_sentiment': 'Sentiment Score', 'index': 'Ticker'},
+                    hover_data=['article_count'],
+                    height=600
+                )
+                fig.update_layout(
+                    coloraxis_showscale=False,
+                    yaxis={'categoryorder': 'total ascending'},
+                    xaxis_range=[-1, 1]
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("No ticker data available after processing")
+        except Exception as e:
+            st.error(f"Error in ticker comparison: {str(e)}")
     
     with tab3:
-        show_source_analysis(df)
+        st.subheader("📰 Source Analysis")
+        
+        source_col1, source_col2 = st.columns(2)
+        
+        with source_col1:
+            st.markdown("#### Top Sources by Volume")
+            source_counts = df['source'].value_counts().nlargest(10)
+            fig1 = px.pie(
+                source_counts,
+                names=source_counts.index,
+                values=source_counts.values,
+                title="Top News Sources"
+            )
+            st.plotly_chart(fig1, use_container_width=True)
+        
+        with source_col2:
+            st.markdown("#### Sentiment by Source")
+            source_stats = df.groupby('source').agg({
+                'compound': 'mean',
+                'title': 'count'
+            }).sort_values('title', ascending=False).head(10)
+            
+            fig2 = px.bar(
+                source_stats,
+                x='compound',
+                y=source_stats.index,
+                orientation='h',
+                color='compound',
+                color_continuous_scale='RdYlGn',
+                title="Average Sentiment by Source",
+                labels={'compound': 'Avg. Sentiment', 'y': 'Source'},
+                hover_data=['title']
+            )
+            fig2.update_layout(
+                coloraxis_showscale=True,
+                yaxis={'categoryorder': 'total ascending'},
+                xaxis_range=[-1, 1]
+            )
+            st.plotly_chart(fig2, use_container_width=True)
     
     with tab4:
         filtered_df = show_raw_data(df)

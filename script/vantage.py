@@ -12,7 +12,7 @@ def main() :
     load_dotenv('.env.local') 
     # Get your Bearer Token from environment variables
     api_key = os.getenv('VANTAGE_ACCESS_TOKEN')
-    symbol = 'AAPL'  # Apple stock symbol 
+    symbol = 'IBM'  # Apple stock symbol 
     url = f'https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol={symbol}&interval=5min&apikey={api_key}'
     response = requests.get(url)
     data = response.json()
