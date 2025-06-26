@@ -535,6 +535,54 @@ def show_raw_data(df: pd.DataFrame):
         use_container_width=True,
         height=600
     )
+    
+    return filtered_df
+
+def convert_df_to_csv(df: pd.DataFrame) -> bytes:
+    """Convert dataframe to CSV bytes for download"""
+    import io
+    output = io.BytesIO()
+    df.to_csv(output, index=False)
+    output.seek(0)
+    return output.getvalue()
+
+@st.cache_data(ttl=3600)
+def fetch_data_from_csv(uploaded_file, days_back=7):
+    """Fetch stock data from a CSV file"""
+    try:
+        df = pd.read_csv(uploaded_file)
+        
+        # Handle different CSV formats
+        if 'published' in df.columns:
+            df['published'] = pd.to_datetime(df['published'])
+        elif 'publishedAt' in df.columns:
+            df['published'] = pd.to_datetime(df['publishedAt'])
+        else:
+            st.error("CSV must contain 'published' or 'publishedAt' column")
+            return pd.DataFrame()
+        
+        # Filter by date
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=days_back)
+        df = df[(df['published'] >= start_date) & (df['published'] <= end_date)]
+        
+        # Ensure required columns
+        if 'title' not in df.columns:
+            df['title'] = ''
+        if 'text' not in df.columns:
+            df['text'] = df.get('description', '') + " " + df.get('content', '')
+        if 'source' not in df.columns:
+            df['source'] = 'Unknown'
+        if 'url' not in df.columns:
+            df['url'] = ''
+        if 'tickers' not in df.columns:
+            df['tickers'] = [[]] * len(df)
+        
+        return df
+    
+    except Exception as e:
+        st.error(f"Error reading CSV file: {e}")
+        return pd.DataFrame()
 
 def show_main_content(df: pd.DataFrame, min_sentiment: float):
     """Render the main dashboard content"""
@@ -580,45 +628,28 @@ def show_main_content(df: pd.DataFrame, min_sentiment: float):
         show_source_analysis(df)
     
     with tab4:
-        show_raw_data(df)
-
-@st.cache_data(ttl=3600)
-def fetch_data_from_csv(uploaded_file, days_back=7):
-    """Fetch stock data from a CSV file"""
-    try:
-        df = pd.read_csv(uploaded_file)
-        
-        # Handle different CSV formats
-        if 'published' in df.columns:
-            df['published'] = pd.to_datetime(df['published'])
-        elif 'publishedAt' in df.columns:
-            df['published'] = pd.to_datetime(df['publishedAt'])
-        else:
-            st.error("CSV must contain 'published' or 'publishedAt' column")
-            return pd.DataFrame()
-        
-        # Filter by date
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=days_back)
-        df = df[(df['published'] >= start_date) & (df['published'] <= end_date)]
-        
-        # Ensure required columns
-        if 'title' not in df.columns:
-            df['title'] = ''
-        if 'text' not in df.columns:
-            df['text'] = df.get('description', '') + " " + df.get('content', '')
-        if 'source' not in df.columns:
-            df['source'] = 'Unknown'
-        if 'url' not in df.columns:
-            df['url'] = ''
-        if 'tickers' not in df.columns:
-            df['tickers'] = [[]] * len(df)
-        
-        return df
+        filtered_df = show_raw_data(df)
     
-    except Exception as e:
-        st.error(f"Error reading CSV file: {e}")
-        return pd.DataFrame()
+    # Add download button at the bottom of the main content
+    st.divider()
+    st.subheader("Export Data")
+    
+    # Prepare columns for better layout
+    col1, col2 = st.columns([1, 3])
+    
+    with col1:
+        # Button to download the filtered data
+        csv = convert_df_to_csv(filtered_df if 'filtered_df' in locals() else df)
+        st.download_button(
+            label="📥 Download as CSV",
+            data=csv,
+            file_name="financial_news_sentiment.csv",
+            mime="text/csv",
+            help="Download the current view of the data (with filters applied)"
+        )
+    
+    with col2:
+        st.info("The downloaded CSV will contain all available fields including sentiment scores, source information, and article text.")
 
 def main():
     """Main application function"""
