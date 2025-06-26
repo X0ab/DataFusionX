@@ -28,6 +28,11 @@ class Config:
             'Bloomberg', 'Reuters', 'CNBC', 
             'Wall Street Journal', 'Financial Times'
         ]
+        self.API_ENDPOINTS = {
+            'finnhub': 'https://finnhub.io/api/v1/stock/symbol?exchange=US',
+            'alpha_vantage': 'https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=IBM',
+            'newsapi': 'https://newsapi.org/v2/top-headlines?country=us'
+        }
 
 # Sentiment Analyzer Class
 class SentimentAnalyzer:
@@ -241,17 +246,71 @@ class NewsAPIFetcher:
             st.error(f"NewsAPI Request Failed: {e}")
             return pd.DataFrame()
 
+# Add this new function
+def check_api_status(config: Config) -> Dict[str, bool]:
+    """Check status of all APIs"""
+    status = {}
+    try:
+        # Check Finnhub
+        finnhub_res = requests.get(
+            config.API_ENDPOINTS['finnhub'],
+            params={"token": config.API_KEYS['finnhub']}
+        )
+        status['finnhub'] = finnhub_res.status_code == 200
+        
+        # Check Alpha Vantage
+        alpha_res = requests.get(
+            config.API_ENDPOINTS['alpha_vantage'],
+            params={"apikey": config.API_KEYS['alpha_vantage']}
+        )
+        status['alpha_vantage'] = alpha_res.status_code == 200
+        
+        # Check NewsAPI
+        newsapi_res = requests.get(
+            config.API_ENDPOINTS['newsapi'],
+            params={"apiKey": config.API_KEYS['newsapi']}
+        )
+        status['newsapi'] = newsapi_res.status_code == 200
+        
+    except requests.exceptions.RequestException:
+        status = {api: False for api in config.API_KEYS.keys()}
+    
+    return status
+
 def show_sidebar(config: Config):
     with st.sidebar:
+        st.header("API Status")
+        
+        # Get API status
+        api_status = check_api_status(config)
+        
+        # Display status indicators
+        #col1, col2, col3 = st.columns(3)
+        #with col1:
+        st.markdown(f"**Finnhub**: {'🟢 🟢Online' if api_status['finnhub'] else '🔴'}")
+        #with col2:
+        st.markdown(f"**Alpha Vantage**: {'🟢 🟢Online' if api_status['alpha_vantage'] else '🔴'}")
+        #with col3:
+        st.markdown(f"**NewsAPI**: {'🟢 🟢Online' if api_status['newsapi'] else '🔴'}")
+        
+        # Add usage warning if any API is down
+        if not all(api_status.values()):
+            st.warning("Some APIs are unavailable. Features may be limited.")
+            st.markdown("**API:** 🔴 Offline")
+        
+ 
         st.header("Analysis Settings")
         
         # API status check
-        try:
-            test_finnhub = requests.get(f"https://finnhub.io/api/v1/stock/symbol?exchange=US&token={config.API_KEYS['finnhub']}")
-            status = "🟢 Online" if test_finnhub.status_code == 200 else "🟠 Limited"
-            st.markdown(f"**Finnhub API:** {status}")
-        except:
-            st.markdown("**Finnhub API:** 🔴 Offline")
+        #try:
+        #    test_finnhub = requests.get(f"https://finnhub.io/api/v1/stock/symbol?exchange=US&token={config.API_KEYS['finnhub']}")
+        #    status = "🟢 Online" if test_finnhub.status_code == 200 else "🟠 Limited"
+        #    st.markdown(f"**Finnhub API:** {status}")
+        #    st.markdown(f"**Alpha Vantage**: {'🟢 Online' if api_status['alpha_vantage'] else '🔴'}")
+        #    st.markdown(f"**NewsAPI**: {'🟢Online' if api_status['newsapi'] else '🔴'}")
+            
+        #except:
+        #    st.markdown("**Finnhub API:** 🔴 Offline")
         
         # Topic selection
         selected_topic = st.selectbox(
