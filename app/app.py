@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 import requests
 from typing import List, Dict, Optional
 import numpy as np
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+import io
 
 # Configuration Class
 class Config:
@@ -12,24 +14,24 @@ class Config:
         self.CACHE_TTL = 3600  # 1 hour cache
         self.API_KEYS = {
             'alpha_vantage': '01DTV6BVSWVIZSX2',
-            'newsapi': 'bbf76eb5888b480d8d910a091c56ec3d'
+            'newsapi': 'bbf76eb5888b480d8d910a091c56ec3d',
+            'finnhub': 'd09r1p9r01qus8rest20d09r1p9r01qus8rest2g'
         }
         self.TOPICS = {
-            'Technology': ['IBM','AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META'],
+            'Technology': ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'IBM'],
             'Finance': ['JPM', 'BAC', 'GS', 'MS', 'C'],
             'Energy': ['XOM', 'CVX', 'COP', 'SLB', 'EOG'],
-            'Cryptocurrency': ['CRYPTO:BTC', 'CRYPTO:ETH', 'CRYPTO:ADA', 'CRYPTO:DOGE'],
-            'Forex': ['FOREX:USD', 'FOREX:EUR', 'FOREX:GBP', 'FOREX:JPY']
+            'Cryptocurrency': ['BTC', 'ETH', 'ADA', 'DOGE'],  # Finnhub format
+            'Forex': ['USD', 'EUR', 'GBP', 'JPY']  # Finnhub format
         }
         self.SOURCES = [
-            'Zacks Commentary','Motley Fool','Bloomberg', 'Reuters', 'CNBC', 
-            'Wall Street Journal','Benzinga', 'Financial Times', 'MarketWatch', 'Seeking Alpha'
+            'Bloomberg', 'Reuters', 'CNBC', 
+            'Wall Street Journal', 'Financial Times'
         ]
 
 # Sentiment Analyzer Class
 class SentimentAnalyzer:
     def __init__(self):
-        from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
         self.analyzer = SentimentIntensityAnalyzer()
     
     def analyze_text(self, text: str) -> dict:
@@ -45,7 +47,7 @@ class SentimentAnalyzer:
         if 'title' not in df.columns:
             df['title'] = ''
         if 'text' not in df.columns:
-            df['text'] = df.get('description', '')
+            df['text'] = df.get('description', df.get('summary', ''))
         
         # Analyze sentiment
         df['sentiment'] = df.apply(
@@ -67,6 +69,55 @@ class SentimentAnalyzer:
         return df
 
 # News Fetcher Classes
+class FinnhubFetcher:
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self.base_url = "https://finnhub.io/api/v1"
+        
+    def fetch_news(self, tickers: List[str], days_back: int = 7) -> pd.DataFrame:
+        try:
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=days_back)
+            
+            response = requests.get(
+                f"{self.base_url}/news?category=general&token={self.api_key}"
+            )
+            response.raise_for_status()
+            data = response.json()
+            
+            if not data:
+                st.warning("No news articles found from Finnhub")
+                return pd.DataFrame()
+                
+            df = pd.DataFrame(data)
+            
+            # Process the data
+            df['published'] = pd.to_datetime(df['datetime'], unit='s')
+            df['source'] = df['source'].fillna('Unknown')
+            df['title'] = df.get('headline', '')
+            df['text'] = df.get('summary', '')
+            df['url'] = df.get('url', '')
+            df['image'] = df.get('image', '')
+            
+            # Filter by date
+            df = df[(df['published'] >= start_date) & (df['published'] <= end_date)]
+            
+            # Filter by tickers
+            if tickers:
+                df['tickers'] = df.apply(
+                    lambda row: [t for t in tickers 
+                               if str(t).lower() in row['title'].lower() 
+                               or str(t).lower() in row['text'].lower()],
+                    axis=1
+                )
+                df = df[df['tickers'].apply(len) > 0]
+            
+            return df
+            
+        except requests.exceptions.RequestException as e:
+            st.error(f"Finnhub API Request Failed: {str(e)}")
+            return pd.DataFrame()
+
 class AlphaVantageFetcher:
     def __init__(self, api_key: str):
         self.api_key = api_key
@@ -74,31 +125,15 @@ class AlphaVantageFetcher:
         
     def fetch_news(self, tickers: List[str], start_date: datetime = None, end_date: datetime = None) -> pd.DataFrame:
         try:
-            # Separate ticker types
-            regular_tickers = [t for t in tickers if not (t.startswith('CRYPTO:') or t.startswith('FOREX:'))]
-            crypto_tickers = [t.replace('CRYPTO:', '') for t in tickers if t.startswith('CRYPTO:')]
-            forex_tickers = [t.replace('FOREX:', '') for t in tickers if t.startswith('FOREX:')]
-            
             params = {
                 "function": "NEWS_SENTIMENT",
                 "apikey": self.api_key,
-                "limit": "200"  # Increased limit
+                "limit": "200"
             }
             
-            # Add tickers if we have regular ones
-            if regular_tickers:
-                params["tickers"] = ",".join(regular_tickers)
+            if tickers:
+                params["tickers"] = ",".join(tickers)
             
-            # Add topics for crypto/forex
-            topics = []
-            if crypto_tickers:
-                topics.append("blockchain")
-            if forex_tickers:
-                topics.append("forex_market")
-            if topics:
-                params["topics"] = ",".join(topics)
-            
-            # Add time range if specified
             if start_date and end_date:
                 params["time_from"] = start_date.strftime("%Y%m%dT%H%M")
                 params["time_to"] = end_date.strftime("%Y%m%dT%H%M")
@@ -107,13 +142,11 @@ class AlphaVantageFetcher:
             response.raise_for_status()
             data = response.json()
             
-            # Check for rate limit message
             if "Note" in data and "API call frequency" in data["Note"]:
-                st.warning("API rate limit reached. Please wait a minute or upgrade your plan.")
+                st.warning("Alpha Vantage API rate limit reached")
                 return pd.DataFrame()
-            
+                
             if "feed" not in data:
-                st.warning(f"No news articles found for: {tickers}")
                 return pd.DataFrame()
                 
             df = pd.DataFrame(data["feed"])
@@ -121,28 +154,20 @@ class AlphaVantageFetcher:
             if df.empty:
                 return df
                 
-            # Process the data
             df['published'] = pd.to_datetime(df['time_published'], format='%Y%m%dT%H%M%S')
-            df['tickers'] = df['ticker_sentiment'].apply(
-                lambda x: [item['ticker'] for item in x] if isinstance(x, list) else []
-            )
-            
-            # Add crypto/forex tickers to relevant articles
-            additional_tickers = crypto_tickers + forex_tickers
-            if additional_tickers:
-                df['tickers'] = df['tickers'].apply(
-                    lambda x: x + additional_tickers if x else additional_tickers
-                )
-            
             df['source'] = df['source'].str.replace('^.*\\|\\s*', '', regex=True)
             df['title'] = df.get('title', '')
             df['text'] = df.get('summary', '')
             df['url'] = df.get('url', '')
+            df['image'] = df.get('banner_image', '')
+            df['tickers'] = df['ticker_sentiment'].apply(
+                lambda x: [item['ticker'] for item in x] if isinstance(x, list) else []
+            )
             
             return df
             
         except requests.exceptions.RequestException as e:
-            st.error(f"API Request Failed: {str(e)}")
+            st.error(f"Alpha Vantage API Request Failed: {str(e)}")
             return pd.DataFrame()
 
 class NewsAPIFetcher:
@@ -151,22 +176,21 @@ class NewsAPIFetcher:
         self.base_url = "https://newsapi.org/v2/everything"
         
     def fetch_news(self, tickers: List[str], days_back: int) -> pd.DataFrame:
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=days_back)
-        
-        query = " OR ".join([f"${ticker}" for ticker in tickers if not (ticker.startswith('CRYPTO:') or ticker.startswith('FOREX:'))])
-        
-        params = {
-            "q": query,
-            "from": start_date.strftime("%Y-%m-%d"),
-            "to": end_date.strftime("%Y-%m-%d"),
-            "language": "en",
-            "sortBy": "publishedAt",
-            "apiKey": self.api_key,
-            "pageSize": 100  # Max allowed by free tier
-        }
-        
         try:
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=days_back)
+            
+            query = " OR ".join([f"${t}" for t in tickers])
+            params = {
+                "q": query,
+                "from": start_date.strftime("%Y-%m-%d"),
+                "to": end_date.strftime("%Y-%m-%d"),
+                "language": "en",
+                "sortBy": "publishedAt",
+                "apiKey": self.api_key,
+                "pageSize": 100
+            }
+            
             response = requests.get(self.base_url, params=params)
             response.raise_for_status()
             data = response.json()
@@ -180,15 +204,16 @@ class NewsAPIFetcher:
             if df.empty:
                 return df
                 
-            # Process the data
             df['published'] = pd.to_datetime(df['publishedAt'])
             df['source'] = df['source'].apply(lambda x: x.get('name', 'Unknown'))
-            df['tickers'] = df.apply(
-                lambda row: [ticker for ticker in tickers if ticker.lower() in row['title'].lower()], 
-                axis=1
-            )
+            df['title'] = df.get('title', '')
             df['text'] = df.get('description', '') + " " + df.get('content', '')
             df['url'] = df.get('url', '')
+            df['image'] = df.get('urlToImage', '')
+            df['tickers'] = df.apply(
+                lambda row: [t for t in tickers if str(t).lower() in row['title'].lower()],
+                axis=1
+            )
             
             return df
             
@@ -196,34 +221,19 @@ class NewsAPIFetcher:
             st.error(f"NewsAPI Request Failed: {e}")
             return pd.DataFrame()
 
-def check_alpha_vantage_status(api_key: str) -> bool:
-    """Check if Alpha Vantage API is working"""
-    try:
-        params = {
-            "function": "NEWS_SENTIMENT",
-            "tickers": "AAPL",
-            "apikey": api_key,
-            #"limit": "1"
-        }
-        response = requests.get("https://www.alphavantage.co/query", params=params)
-        print(response.json())
-        print(f"https://www.alphavantage.co/query",  {params})
-        data = response.json()
-        return "feed" in data
-    except:
-        return False
-
-# Streamlit UI Components
 def show_sidebar(config: Config):
-    """Render the sidebar controls"""
     with st.sidebar:
-        # API status indicator
-        if check_alpha_vantage_status(config.API_KEYS['alpha_vantage']):
-            st.success("Alpha Vantage API: Online")
-        else:
-            st.error("Alpha Vantage API: Offline (check key or limits)")
-        
         st.header("Analysis Settings")
+        
+        # API status
+        try:
+            test_finnhub = requests.get(f"https://finnhub.io/api/v1/stock/symbol?exchange=US&token={config.API_KEYS['finnhub']}")
+            if test_finnhub.status_code == 200:
+                st.success("Finnhub API: Online")
+            else:
+                st.error("Finnhub API: Limited (check usage)")
+        except:
+            st.error("Finnhub API: Offline")
         
         # Topic selection
         selected_topic = st.selectbox(
@@ -236,8 +246,7 @@ def show_sidebar(config: Config):
         selected_tickers = st.multiselect(
             "Select Tickers",
             options=config.TOPICS[selected_topic],
-            default=config.TOPICS[selected_topic][:3],
-            help="For cryptocurrencies use CRYPTO:BTC format, for forex use FOREX:USD"
+            default=config.TOPICS[selected_topic][:3]
         )
         
         # Source filtering
@@ -259,7 +268,7 @@ def show_sidebar(config: Config):
         # Data source selection
         data_source = st.radio(
             "Select Data Source",
-            ["Alpha Vantage API", "NewsAPI", "Local CSV File"],
+            ["Finnhub", "Alpha Vantage API", "NewsAPI", "Local CSV File"],
             index=0
         )
         
@@ -269,72 +278,61 @@ def show_sidebar(config: Config):
         return selected_tickers, selected_sources, days_back, min_sentiment, data_source, debug_mode
 
 def show_news_swiper(df: pd.DataFrame):
-    """Display news articles in a swiper format"""
     if df.empty or 'url' not in df.columns or 'title' not in df.columns:
         return
     
     st.subheader("📰 News Swiper")
     
-    # Track the index of the article being displayed
     if 'index' not in st.session_state:
         st.session_state.index = 0
     
-    # Reset index if it's out of bounds
     if st.session_state.index >= len(df):
         st.session_state.index = 0
     
-    # Display current article
     article = df.iloc[st.session_state.index]
     col1, col2 = st.columns([1, 2])
     
     with col1:
-        # Display image if available
-        if 'urlToImage' in article and pd.notna(article['urlToImage']):
-            st.image(article['urlToImage'], caption=f"Source: {article.get('source', 'Unknown')}", width=300)
+        if 'image' in article and pd.notna(article['image']) and article['image'] != '':
+            st.image(article['image'], caption=f"Source: {article.get('source', 'Unknown')}", width=300)
         
-        # Navigation buttons
         nav_col1, nav_col2 = st.columns([1, 1])
         with nav_col1:
             if st.button("⏮️ Previous") and st.session_state.index > 0:
                 st.session_state.index -= 1
-                st.rerun()  # Changed from st.experimental_rerun()
+                st.rerun()
         with nav_col2:
             if st.button("⏭️ Next") and st.session_state.index < len(df) - 1:
                 st.session_state.index += 1
-                st.rerun()  # Changed from st.experimental_rerun()
+                st.rerun()
     
     with col2:
         st.subheader(article['title'])
         
-        # Display sentiment
         sentiment = article.get('vader_compound', 0)
         sentiment_color = "green" if sentiment >= 0.05 else ("red" if sentiment <= -0.05 else "gray")
         st.markdown(f"**Sentiment:** :{sentiment_color}[{sentiment:.2f}]")
         
-        # Display article content
         if 'text' in article and pd.notna(article['text']):
-            st.markdown(article['text'][:500] + "...")  # Show first 500 chars
+            st.markdown(article['text'][:500] + "...")
         
-        # Display metadata
         meta_col1, meta_col2 = st.columns([1, 1])
         with meta_col1:
             if 'published' in article:
                 st.caption(f"📅 {article['published'].strftime('%Y-%m-%d %H:%M')}")
         with meta_col2:
             if 'tickers' in article:
-                tickers = ", ".join([t.replace('CRYPTO:', '').replace('FOREX:', '') for t in article['tickers']]) if article['tickers'] else "None"
+                tickers = ", ".join(article['tickers']) if article['tickers'] else "None"
                 st.caption(f"📊 Tickers: {tickers}")
         
         st.markdown(f"[Read full article ↗️]({article['url']})")
+
 def show_sentiment_analysis(df: pd.DataFrame):
-    """Sentiment trends and distributions"""
     st.subheader("Sentiment Over Time")
     
-    # Prepare time series data
     df['date'] = pd.to_datetime(df['published']).dt.date
     daily_sentiment = df.groupby(['date', 'sentiment_label']).size().unstack().fillna(0)
     
-    # Create visualization
     fig1 = px.area(
         daily_sentiment,
         title="Daily Sentiment Trend",
@@ -347,7 +345,6 @@ def show_sentiment_analysis(df: pd.DataFrame):
     )
     st.plotly_chart(fig1, use_container_width=True)
     
-    # Sentiment distribution
     st.subheader("Sentiment Distribution")
     fig2 = px.histogram(
         df,
@@ -365,7 +362,6 @@ def show_sentiment_analysis(df: pd.DataFrame):
     st.plotly_chart(fig2, use_container_width=True)
 
 def show_ticker_comparison(df: pd.DataFrame):
-    """Compare sentiment across tickers"""
     st.subheader("Ticker Sentiment Comparison")
     
     if df.empty or 'tickers' not in df.columns:
@@ -373,15 +369,13 @@ def show_ticker_comparison(df: pd.DataFrame):
         return
     
     try:
-        # Explode the tickers lists into separate rows
         exploded_df = df.explode('tickers')
         exploded_df = exploded_df[exploded_df['tickers'].notna()]
         
         if exploded_df.empty:
-            st.warning("No valid ticker references found in articles")
+            st.warning("No valid ticker references found")
             return
         
-        # Calculate average sentiment per ticker
         ticker_sentiment = exploded_df.groupby('tickers', observed=True).agg(
             mean_sentiment=('vader_compound', 'mean'),
             article_count=('title', 'count')
@@ -391,7 +385,6 @@ def show_ticker_comparison(df: pd.DataFrame):
             st.warning("No ticker sentiment data available")
             return
             
-        # Create visualization with better formatting for crypto/forex
         fig = px.bar(
             ticker_sentiment,
             x='mean_sentiment',
@@ -404,13 +397,7 @@ def show_ticker_comparison(df: pd.DataFrame):
             hover_data=['article_count']
         )
         
-        # Improve y-axis labels for crypto/forex
         fig.update_layout(
-            yaxis=dict(
-                tickmode='array',
-                tickvals=ticker_sentiment.index,
-                ticktext=[t.replace('CRYPTO:', '').replace('FOREX:', '') for t in ticker_sentiment.index]
-            ),
             coloraxis_showscale=False,
             yaxis_categoryorder='total ascending'
         )
@@ -421,31 +408,22 @@ def show_ticker_comparison(df: pd.DataFrame):
         st.error(f"Error generating ticker comparison: {str(e)}")
 
 def show_source_analysis(df: pd.DataFrame):
-    """Analyze news sources"""
     st.subheader("Source Analysis")
     
     if df.empty or 'source' not in df.columns:
         st.warning("No source data available")
         return
     
-    # Source credibility scoring
     credibility_scores = {
-        'Zacks Commentary': 8.0,
-        'Motley Fool': 8.0,
         'Bloomberg': 9.5,
         'Reuters': 9.5,
         'CNBC': 8.5,
         'Wall Street Journal': 9.0,
-        'Benzinga': 7.5,
-        'Financial Times': 9.0,
-        'MarketWatch': 8.0,
-        'Seeking Alpha': 7.5
+        'Financial Times': 9.0
     }
     
-    # Add credibility to dataframe
     df['credibility'] = df['source'].map(credibility_scores).fillna(7.0)
     
-    # Create tabs for different views
     tab1, tab2 = st.tabs(["Source Distribution", "Source Credibility"])
     
     with tab1:
@@ -482,14 +460,12 @@ def show_source_analysis(df: pd.DataFrame):
             st.warning("No source sentiment data available")
 
 def show_raw_data(df: pd.DataFrame):
-    """Display raw data with filtering options"""
     st.subheader("Article Data")
     
     if df.empty:
         st.warning("No data available")
         return
     
-    # Add filtering options
     col1, col2 = st.columns(2)
     with col1:
         min_sentiment = st.slider(
@@ -505,7 +481,6 @@ def show_raw_data(df: pd.DataFrame):
             key="raw_data_sources"
         )
     
-    # Apply filters
     filtered_df = df[
         (df['vader_compound'] >= min_sentiment) &
         (df['source'].isin(selected_sources if selected_sources else df['source'].unique()))
@@ -515,7 +490,6 @@ def show_raw_data(df: pd.DataFrame):
         st.warning("No articles match your filters")
         return
     
-    # Display data
     st.dataframe(
         filtered_df[['title', 'source', 'published', 'tickers', 'vader_compound', 'sentiment_label']],
         column_config={
@@ -538,8 +512,6 @@ def show_raw_data(df: pd.DataFrame):
     return filtered_df
 
 def convert_df_to_csv(df: pd.DataFrame) -> bytes:
-    """Convert dataframe to CSV bytes for download"""
-    import io
     output = io.BytesIO()
     df.to_csv(output, index=False)
     output.seek(0)
@@ -547,11 +519,9 @@ def convert_df_to_csv(df: pd.DataFrame) -> bytes:
 
 @st.cache_data(ttl=3600)
 def fetch_data_from_csv(uploaded_file, days_back=7):
-    """Fetch stock data from a CSV file"""
     try:
         df = pd.read_csv(uploaded_file)
         
-        # Handle different CSV formats
         if 'published' in df.columns:
             df['published'] = pd.to_datetime(df['published'])
         elif 'publishedAt' in df.columns:
@@ -560,16 +530,14 @@ def fetch_data_from_csv(uploaded_file, days_back=7):
             st.error("CSV must contain 'published' or 'publishedAt' column")
             return pd.DataFrame()
         
-        # Filter by date
         end_date = datetime.now()
         start_date = end_date - timedelta(days=days_back)
         df = df[(df['published'] >= start_date) & (df['published'] <= end_date)]
         
-        # Ensure required columns
         if 'title' not in df.columns:
             df['title'] = ''
         if 'text' not in df.columns:
-            df['text'] = df.get('description', '') + " " + df.get('content', '')
+            df['text'] = df.get('description', df.get('summary', ''))
         if 'source' not in df.columns:
             df['source'] = 'Unknown'
         if 'url' not in df.columns:
@@ -584,32 +552,24 @@ def fetch_data_from_csv(uploaded_file, days_back=7):
         return pd.DataFrame()
 
 def show_main_content(df: pd.DataFrame, min_sentiment: float):
-    """Render the main dashboard content"""
     if df.empty:
         st.warning("No news articles match your filters")
         return
     
-    # Filter by sentiment
     df = df[df['vader_compound'] >= min_sentiment]
     
     if df.empty:
         st.warning("No articles meet the minimum sentiment threshold")
         return
     
-    # Display metrics
     col1, col2, col3, col4 = st.columns(4)
     avg_sentiment = df['vader_compound'].mean()
-    sentiment_diff = abs(avg_sentiment - min_sentiment)
-    col1.metric(
-        "Average Sentiment", 
-        f"{avg_sentiment:.2f}", 
-        "Positive" if avg_sentiment > 0 else "Negative"
-    )
+    col1.metric("Average Sentiment", f"{avg_sentiment:.2f}", 
+               "Positive" if avg_sentiment > 0 else "Negative")
     col2.metric("Total Articles", len(df))
     col3.metric("Sources", df['source'].nunique())
     col4.metric("Tickers Covered", df['tickers'].explode().nunique())
     
-    # Main tabs
     tab1, tab2, tab3, tab4 = st.tabs([
         "📈 Sentiment Analysis", 
         "🏷️ Ticker Comparison", 
@@ -629,15 +589,12 @@ def show_main_content(df: pd.DataFrame, min_sentiment: float):
     with tab4:
         filtered_df = show_raw_data(df)
     
-    # Add download button at the bottom of the main content
     st.divider()
     st.subheader("Export Data")
     
-    # Prepare columns for better layout
     col1, col2 = st.columns([1, 3])
     
     with col1:
-        # Button to download the filtered data
         csv = convert_df_to_csv(filtered_df if 'filtered_df' in locals() else df)
         st.download_button(
             label="📥 Download as CSV",
@@ -648,15 +605,12 @@ def show_main_content(df: pd.DataFrame, min_sentiment: float):
         )
     
     with col2:
-        st.info("The downloaded CSV will contain all available fields including sentiment scores, source information, and article text.")
+        st.info("The downloaded CSV will contain all available fields including sentiment scores.")
 
 def main():
-    """Main application function"""
-    # Initialize configuration
     config = Config()
     analyzer = SentimentAnalyzer()
     
-    # Set up page configuration
     st.set_page_config(
         page_title="Financial News Sentiment Dashboard",
         page_icon="📈",
@@ -665,68 +619,69 @@ def main():
     
     st.title("📰 Financial News Sentiment Dashboard")
     
-    # Get user inputs from sidebar
     (selected_tickers, selected_sources, days_back, 
      min_sentiment, data_source, debug_mode) = show_sidebar(config)
     
-    # Initialize dataframe
     analyzed_df = pd.DataFrame()
     
-    # Fetch data based on selected source
-    if data_source in ["Alpha Vantage API", "NewsAPI"]:
+    if data_source == "Finnhub":
         if not selected_tickers:
             st.warning("Please select at least one ticker")
             return
         
-        with st.spinner("Fetching and analyzing news..."):
-            if data_source == "Alpha Vantage API":
-                fetcher = AlphaVantageFetcher(config.API_KEYS['alpha_vantage'])
-                start_date = datetime.now() - timedelta(days=days_back)
-                end_date = datetime.now()
-                news_df = fetcher.fetch_news(selected_tickers, start_date, end_date)
-                
-                # If no data, try without date filter
-                if news_df.empty:
-                    st.warning("Trying without date filter...")
-                    news_df = fetcher.fetch_news(selected_tickers, None, None)
-            else:  # NewsAPI
-                fetcher = NewsAPIFetcher(config.API_KEYS['newsapi'])
-                news_df = fetcher.fetch_news(selected_tickers, days_back)
+        with st.spinner("Fetching news from Finnhub..."):
+            fetcher = FinnhubFetcher(config.API_KEYS['finnhub'])
+            news_df = fetcher.fetch_news(selected_tickers, days_back)
             
             if not news_df.empty:
-                # Apply source filtering if sources are selected
                 if selected_sources and 'source' in news_df.columns:
                     news_df = news_df[news_df['source'].isin(selected_sources)]
-                
-                # Analyze sentiment
                 analyzed_df = analyzer.analyze_dataframe(news_df)
             else:
-                st.error("""
-                No news articles found. Possible solutions:
-                1. Try different tickers or time period
-                2. Check your API key limits
-                3. Some tickers may not have recent news coverage
-                """)
-                
-                # Show sample data option
-                if st.checkbox("Show sample data for demo"):
-                    sample_data = {
-                        'title': ["Sample: Bitcoin reaches new high", "Sample: Fed raises interest rates"],
-                        'source': ["CryptoNews", "Financial Times"],
-                        'published': [datetime.now(), datetime.now() - timedelta(days=1)],
-                        'tickers': [[selected_tickers[0] if selected_tickers else "AAPL"], 
-                                   [selected_tickers[0] if selected_tickers else "AAPL"]],
-                        'url': ["https://example.com/1", "https://example.com/2"],
-                        'text': [
-                            "Bitcoin reached a new all-time high amid institutional adoption.",
-                            "Federal Reserve announced a 0.25% interest rate hike to combat inflation."
-                        ]
-                    }
-                    news_df = pd.DataFrame(sample_data)
-                    analyzed_df = analyzer.analyze_dataframe(news_df)
-                else:
-                    return
-    else:  # Local CSV File
+                st.error("No news articles found from Finnhub. Try different tickers.")
+                return
+    
+    elif data_source == "Alpha Vantage API":
+        if not selected_tickers:
+            st.warning("Please select at least one ticker")
+            return
+        
+        with st.spinner("Fetching news from Alpha Vantage..."):
+            fetcher = AlphaVantageFetcher(config.API_KEYS['alpha_vantage'])
+            start_date = datetime.now() - timedelta(days=days_back)
+            end_date = datetime.now()
+            news_df = fetcher.fetch_news(selected_tickers, start_date, end_date)
+            
+            if news_df.empty:
+                st.warning("Trying without date filter...")
+                news_df = fetcher.fetch_news(selected_tickers, None, None)
+            
+            if not news_df.empty:
+                if selected_sources and 'source' in news_df.columns:
+                    news_df = news_df[news_df['source'].isin(selected_sources)]
+                analyzed_df = analyzer.analyze_dataframe(news_df)
+            else:
+                st.error("No news found from Alpha Vantage. Check rate limits.")
+                return
+    
+    elif data_source == "NewsAPI":
+        if not selected_tickers:
+            st.warning("Please select at least one ticker")
+            return
+        
+        with st.spinner("Fetching news from NewsAPI..."):
+            fetcher = NewsAPIFetcher(config.API_KEYS['newsapi'])
+            news_df = fetcher.fetch_news(selected_tickers, days_back)
+            
+            if not news_df.empty:
+                if selected_sources and 'source' in news_df.columns:
+                    news_df = news_df[news_df['source'].isin(selected_sources)]
+                analyzed_df = analyzer.analyze_dataframe(news_df)
+            else:
+                st.error("No news found from NewsAPI. Check rate limits.")
+                return
+    
+    else:  # Local CSV
         uploaded_file = st.sidebar.file_uploader(
             "Upload a CSV file", 
             type="csv",
@@ -738,11 +693,8 @@ def main():
                 news_df = fetch_data_from_csv(uploaded_file, days_back)
                 
                 if not news_df.empty:
-                    # Apply source filtering if sources are selected and column exists
                     if selected_sources and 'source' in news_df.columns:
                         news_df = news_df[news_df['source'].isin(selected_sources)]
-                    
-                    # Analyze sentiment
                     analyzed_df = analyzer.analyze_dataframe(news_df)
                 else:
                     st.error("No valid data found in the uploaded CSV file.")
@@ -751,7 +703,6 @@ def main():
             st.info("Please upload a CSV file containing news data.")
             return
     
-    # Debug information
     if debug_mode and not analyzed_df.empty:
         st.subheader("Debug Information")
         st.json({
@@ -761,10 +712,7 @@ def main():
             "missing_values": analyzed_df.isnull().sum().to_dict()
         })
     
-    # Display news swiper
     show_news_swiper(analyzed_df)
-    
-    # Show main content with sentiment analysis
     show_main_content(analyzed_df, min_sentiment)
 
 if __name__ == "__main__":
