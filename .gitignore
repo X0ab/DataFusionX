@@ -7,3 +7,4 @@ script/test
 app/data/
 /data
 *.db
+/.idea
