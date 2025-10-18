@@ -89,7 +89,7 @@ class FinnhubFetcher:
             )
             response.raise_for_status()
             data = response.json()
-            
+             
             if not data:
                 st.warning("No news articles found from Finnhub")
                 return pd.DataFrame()
@@ -107,6 +107,7 @@ class FinnhubFetcher:
             # Initialize empty list column for tickers
             df['tickers'] = [[] for _ in range(len(df))]
             
+             
             # Filter by tickers if provided
             if tickers:
                 tickers_lower = [t.lower() for t in tickers]
@@ -120,7 +121,7 @@ class FinnhubFetcher:
                     df.at[i, 'tickers'] = matched_tickers
                 
                 # Remove rows with no matching tickers
-                df = df[df['tickers'].apply(len) > 0]
+                #df = df[df['tickers'].apply(len) > 0]
             
             # Filter by date
             df = df[(df['published'] >= start_date) & (df['published'] <= end_date)]
@@ -719,7 +720,7 @@ def main():
         with st.spinner("Fetching news from Finnhub..."):
             fetcher = FinnhubFetcher(config.API_KEYS['finnhub'])
             news_df = fetcher.fetch_news(selected_tickers, days_back)
-            
+            #print(news_df)   # Debugging line
             if not news_df.empty:
                 if selected_sources and 'source' in news_df.columns:
                     news_df = news_df[news_df['source'].isin(selected_sources)]
